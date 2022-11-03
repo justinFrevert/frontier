@@ -123,6 +123,7 @@ pub mod pallet {
 
 		/// Allow the origin to call on behalf of given address.
 		type CallOrigin: EnsureAddressOrigin<Self::RuntimeOrigin>;
+
 		/// Allow the origin to withdraw on behalf of given address.
 		type WithdrawOrigin: EnsureAddressOrigin<Self::RuntimeOrigin, Success = Self::AccountId>;
 

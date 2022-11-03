@@ -23,7 +23,7 @@ use sp_runtime::{
 		IdentifyAccount, NumberFor, PostDispatchInfoOf, UniqueSaturatedInto, Verify,
 	},
 	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
-	ApplyExtrinsicResult, MultiSignature, Perbill, Permill,
+	ApplyExtrinsicResult, MultiSignature, Perbill, Permill, DispatchError,
 };
 use sp_std::{marker::PhantomData, prelude::*};
 use sp_version::RuntimeVersion;
@@ -40,7 +40,7 @@ use pallet_transaction_payment::CurrencyAdapter;
 use fp_rpc::TransactionStatus;
 use pallet_ethereum::{Call::transact, Transaction as EthereumTransaction};
 use pallet_evm::{
-	Account as EVMAccount, EnsureAddressTruncated, FeeCalculator, HashedAddressMapping, Runner,
+	Account as EVMAccount, EnsureAddressTruncated, FeeCalculator, HashedAddressMapping, Runner as RunnerT, runner::stack::Runner
 };
 
 // A few exports that help ease life for downstream crates.
@@ -314,6 +314,128 @@ parameter_types! {
 	pub WeightPerGas: Weight = Weight::from_ref_time(WEIGHT_PER_GAS);
 }
 
+pub struct GovernanceRunner;
+impl pallet_evm::Runner<Runtime> for GovernanceRunner {
+	type Error = pallet_evm::Error<Runtime>;
+
+	fn create(
+			source: H160,
+			init: Vec<u8>,
+			value: U256,
+			gas_limit: u64,
+			max_fee_per_gas: Option<U256>,
+			max_priority_fee_per_gas: Option<U256>,
+			nonce: Option<U256>,
+			access_list: Vec<(H160, Vec<H256>)>,
+			is_transactional: bool,
+			validate: bool,
+			config: &evm::Config,
+		) -> Result<pallet_evm::CreateInfo, pallet_evm::RunnerError<Self::Error>> {
+			<Runner<Runtime> as RunnerT<Runtime>>::create(
+				source,
+				init,
+				value,
+				gas_limit,
+				max_fee_per_gas,
+				max_priority_fee_per_gas,
+				nonce,
+				access_list,
+				is_transactional,
+				validate,
+				config,
+			)
+	}
+
+	fn create2(
+			source: H160,
+			init: Vec<u8>,
+			salt: H256,
+			value: U256,
+			gas_limit: u64,
+			max_fee_per_gas: Option<U256>,
+			max_priority_fee_per_gas: Option<U256>,
+			nonce: Option<U256>,
+			access_list: Vec<(H160, Vec<H256>)>,
+			is_transactional: bool,
+			validate: bool,
+			config: &evm::Config,
+		) -> Result<pallet_evm::CreateInfo, pallet_evm::RunnerError<Self::Error>> {
+			<Runner<Runtime> as RunnerT<Runtime>>::create2(
+				source,
+				init,
+				salt,
+				value,
+				gas_limit,
+				max_fee_per_gas,
+				max_priority_fee_per_gas,
+				nonce,
+				access_list,
+				is_transactional,
+				validate,
+				config
+			)
+	}
+
+	fn validate(
+			source: H160,
+			target: Option<H160>,
+			input: Vec<u8>,
+			value: U256,
+			gas_limit: u64,
+			max_fee_per_gas: Option<U256>,
+			max_priority_fee_per_gas: Option<U256>,
+			nonce: Option<U256>,
+			access_list: Vec<(H160, Vec<H256>)>,
+			is_transactional: bool,
+			evm_config: &evm::Config,
+		) -> Result<(), pallet_evm::RunnerError<Self::Error>> {
+			<Runner<Runtime> as RunnerT<Runtime>>::validate(
+				source,
+				target,
+				input,
+				value,
+				gas_limit,
+				max_fee_per_gas,
+				max_priority_fee_per_gas,
+				nonce,
+				access_list,
+				is_transactional,
+				evm_config,
+			)
+	}
+
+	fn call(
+			source: H160,
+			target: H160,
+			input: Vec<u8>,
+			value: U256,
+			gas_limit: u64,
+			max_fee_per_gas: Option<U256>,
+			max_priority_fee_per_gas: Option<U256>,
+			nonce: Option<U256>,
+			access_list: Vec<(H160, Vec<H256>)>,
+			is_transactional: bool,
+			validate: bool,
+			config: &evm::Config,
+		) -> Result<fp_evm::CallInfo, pallet_evm::RunnerError<Self::Error>> {
+			<Runner<Runtime> as RunnerT<Runtime>>::call(
+				source,
+				target,
+				input,
+				value,
+				gas_limit,
+				max_fee_per_gas,
+				max_priority_fee_per_gas,
+				nonce,
+				access_list,
+				is_transactional,
+				validate,
+				config,
+			)
+	}
+
+}
+
 impl pallet_evm::Config for Runtime {
 	type FeeCalculator = BaseFee;
 	type GasWeightMapping = pallet_evm::FixedGasWeightMapping<Self>;
@@ -328,7 +450,7 @@ impl pallet_evm::Config for Runtime {
 	type PrecompilesValue = PrecompilesValue;
 	type ChainId = EVMChainId;
 	type BlockGasLimit = BlockGasLimit;
-	type Runner = pallet_evm::runner::stack::Runner<Self>;
+	type Runner = GovernanceRunner;
 	type OnChargeTransaction = ();
 	type FindAuthor = FindAuthorTruncated<Aura>;
 }
