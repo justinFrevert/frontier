@@ -136,7 +136,7 @@ fn testnet_genesis(
 	chain_id: u64,
 ) -> GenesisConfig {
 	use frontier_template_runtime::{
-		AuraConfig, BalancesConfig, EVMChainIdConfig, EVMConfig, GrandpaConfig, SudoConfig,
+		AuraConfig, BalancesConfig, CouncilConfig, EVMChainIdConfig, EVMConfig, GrandpaConfig, SudoConfig,
 		SystemConfig,
 	};
 
@@ -223,5 +223,15 @@ fn testnet_genesis(
 		ethereum: Default::default(),
 		dynamic_fee: Default::default(),
 		base_fee: Default::default(),
+		council: CouncilConfig {
+			members: vec![
+				get_account_id_from_seed::<sr25519::Public>("Alice"),
+				get_account_id_from_seed::<sr25519::Public>("Bob"),
+				get_account_id_from_seed::<sr25519::Public>("Charlie"),
+				get_account_id_from_seed::<sr25519::Public>("Dave"),
+				get_account_id_from_seed::<sr25519::Public>("Eve"),
+			],
+			phantom: Default::default()
+		}
 	}
 }

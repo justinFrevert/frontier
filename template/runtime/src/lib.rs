@@ -43,6 +43,9 @@ use pallet_evm::{
 	Account as EVMAccount, EnsureAddressTruncated, FeeCalculator, HashedAddressMapping, Runner as RunnerT, runner::stack::Runner
 };
 
+use frame_support::traits::EitherOfDiverse;
+use frame_system::EnsureRoot;
+
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
 	construct_runtime, parameter_types,
@@ -471,9 +474,9 @@ parameter_types! {
 
 type CouncilCollective = pallet_collective::Instance1;
 impl pallet_collective::Config<CouncilCollective> for Runtime {
-	type Origin = RuntimeOrigin;
+	type RuntimeOrigin = RuntimeOrigin;
 	type Proposal = RuntimeCall;
-	type Event = RuntimeEvent;
+	type RuntimeEvent = RuntimeEvent;
 	type MotionDuration = CouncilMotionDuration;
 	type MaxProposals = CouncilMaxProposals;
 	type MaxMembers = CouncilMaxMembers;
