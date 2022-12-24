@@ -6,6 +6,8 @@ use sp_core::{sr25519, Pair, Public, H160, U256};
 use sp_finality_grandpa::AuthorityId as GrandpaId;
 use sp_runtime::traits::{IdentifyAccount, Verify};
 
+use hex_literal::hex;
+
 use frontier_template_runtime::{AccountId, GenesisConfig, Signature, WASM_BINARY};
 
 // The URL for the telemetry server.
@@ -49,13 +51,12 @@ pub fn development_config() -> Result<ChainSpec, String> {
 			testnet_genesis(
 				wasm_binary,
 				// Sudo account
-				get_account_id_from_seed::<sr25519::Public>("Alice"),
+				// get_account_id_from_seed::<sr25519::Public>("Alice"),
+				AccountId::from(hex!("E04CC55ebEE1cBCE552f250e85c57B70B2E2625b")),
+
 				// Pre-funded accounts
 				vec![
-					get_account_id_from_seed::<sr25519::Public>("Alice"),
-					get_account_id_from_seed::<sr25519::Public>("Bob"),
-					get_account_id_from_seed::<sr25519::Public>("Alice//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Bob//stash"),
+					AccountId::from(hex!("E04CC55ebEE1cBCE552f250e85c57B70B2E2625b")),
 				],
 				// Initial PoA authorities
 				vec![authority_keys_from_seed("Alice")],
@@ -90,21 +91,10 @@ pub fn local_testnet_config() -> Result<ChainSpec, String> {
 				wasm_binary,
 				// Initial PoA authorities
 				// Sudo account
-				get_account_id_from_seed::<sr25519::Public>("Alice"),
+				AccountId::from(hex!("E04CC55ebEE1cBCE552f250e85c57B70B2E2625b")),
 				// Pre-funded accounts
 				vec![
-					get_account_id_from_seed::<sr25519::Public>("Alice"),
-					get_account_id_from_seed::<sr25519::Public>("Bob"),
-					get_account_id_from_seed::<sr25519::Public>("Charlie"),
-					get_account_id_from_seed::<sr25519::Public>("Dave"),
-					get_account_id_from_seed::<sr25519::Public>("Eve"),
-					get_account_id_from_seed::<sr25519::Public>("Ferdie"),
-					get_account_id_from_seed::<sr25519::Public>("Alice//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Bob//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Charlie//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Dave//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Eve//stash"),
-					get_account_id_from_seed::<sr25519::Public>("Ferdie//stash"),
+					AccountId::from(hex!("E04CC55ebEE1cBCE552f250e85c57B70B2E2625b")),
 				],
 				vec![
 					authority_keys_from_seed("Alice"),

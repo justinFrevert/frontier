@@ -9,7 +9,7 @@
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use codec::{Decode, Encode};
+use codec::{Decode, Encode, MaxEncodedLen};
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{
@@ -40,8 +40,7 @@ use pallet_transaction_payment::CurrencyAdapter;
 use fp_rpc::TransactionStatus;
 use pallet_ethereum::{Call::transact, Transaction as EthereumTransaction};
 use pallet_evm::{
-	Account as EVMAccount, EnsureAddressTruncated, FeeCalculator, GasWeightMapping,
-	HashedAddressMapping, Runner,
+	Account as EVMAccount, EnsureAddressTruncated, FeeCalculator, HashedAddressMapping, Runner, IdentityAddressMapping, EnsureAddressNever,
 };
 
 // A few exports that help ease life for downstream crates.
@@ -61,11 +60,159 @@ pub use pallet_timestamp::Call as TimestampCall;
 mod precompiles;
 use precompiles::FrontierPrecompiles;
 
+use scale_info::TypeInfo;
+use sha3::{Digest, Keccak256};
+use sp_core::ecdsa;
+
+#[cfg(feature = "std")]
+pub use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+#[derive(
+	Eq, PartialEq, Copy, Clone, Encode, Decode, TypeInfo, MaxEncodedLen, Default, PartialOrd, Ord,
+)]
+pub struct AccountId20(pub [u8; 20]);
+
+#[cfg(feature = "std")]
+impl_serde::impl_fixed_hash_serde!(AccountId20, 20);
+
+#[cfg(feature = "std")]
+impl std::fmt::Display for AccountId20 {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{:?}", self.0)
+	}
+}
+
+impl core::fmt::Debug for AccountId20 {
+	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+		write!(f, "{:?}", H160(self.0))
+	}
+}
+
+impl From<[u8; 20]> for AccountId20 {
+	fn from(bytes: [u8; 20]) -> Self {
+		Self(bytes)
+	}
+}
+
+impl Into<[u8; 20]> for AccountId20 {
+	fn into(self) -> [u8; 20] {
+		self.0
+	}
+}
+
+impl From<H160> for AccountId20 {
+	fn from(h160: H160) -> Self {
+		Self(h160.0)
+	}
+}
+
+impl Into<H160> for AccountId20 {
+	fn into(self) -> H160 {
+		H160(self.0)
+	}
+}
+
+#[cfg(feature = "std")]
+impl std::str::FromStr for AccountId20 {
+	type Err = &'static str;
+	fn from_str(input: &str) -> Result<Self, Self::Err> {
+		H160::from_str(input)
+			.map(Into::into)
+			.map_err(|_| "invalid hex address.")
+	}
+}
+
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Eq, PartialEq, Clone, Encode, Decode, sp_core::RuntimeDebug, TypeInfo)]
+pub struct EthereumSignature(ecdsa::Signature);
+
+impl From<ecdsa::Signature> for EthereumSignature {
+	fn from(x: ecdsa::Signature) -> Self {
+		EthereumSignature(x)
+	}
+}
+
+impl sp_runtime::traits::Verify for EthereumSignature {
+	type Signer = EthereumSigner;
+	fn verify<L: sp_runtime::traits::Lazy<[u8]>>(&self, mut msg: L, signer: &AccountId20) -> bool {
+		let mut m = [0u8; 32];
+		m.copy_from_slice(Keccak256::digest(msg.get()).as_slice());
+		match sp_io::crypto::secp256k1_ecdsa_recover(self.0.as_ref(), &m) {
+			Ok(pubkey) => {
+				AccountId20(H160::from(H256::from_slice(Keccak256::digest(&pubkey).as_slice())).0)
+					== *signer
+			}
+			Err(sp_io::EcdsaVerifyError::BadRS) => {
+				log::error!(target: "evm", "Error recovering: Incorrect value of R or S");
+				false
+			}
+			Err(sp_io::EcdsaVerifyError::BadV) => {
+				log::error!(target: "evm", "Error recovering: Incorrect value of V");
+				false
+			}
+			Err(sp_io::EcdsaVerifyError::BadSignature) => {
+				log::error!(target: "evm", "Error recovering: Invalid signature");
+				false
+			}
+		}
+	}
+}
+
+/// Public key for an Ethereum / Moonbeam compatible account
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Encode, Decode, sp_core::RuntimeDebug)]
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+pub struct EthereumSigner([u8; 20]);
+
+impl sp_runtime::traits::IdentifyAccount for EthereumSigner {
+	type AccountId = AccountId20;
+	fn into_account(self) -> AccountId20 {
+		AccountId20(self.0)
+	}
+}
+
+impl From<[u8; 20]> for EthereumSigner {
+	fn from(x: [u8; 20]) -> Self {
+		EthereumSigner(x)
+	}
+}
+
+impl From<ecdsa::Public> for EthereumSigner {
+	fn from(x: ecdsa::Public) -> Self {
+		let decompressed = libsecp256k1::PublicKey::parse_slice(
+			&x.0,
+			Some(libsecp256k1::PublicKeyFormat::Compressed),
+		)
+		.expect("Wrong compressed public key provided")
+		.serialize();
+		let mut m = [0u8; 64];
+		m.copy_from_slice(&decompressed[1..65]);
+		let account = H160::from(H256::from_slice(Keccak256::digest(&m).as_slice()));
+		EthereumSigner(account.into())
+	}
+}
+
+impl From<libsecp256k1::PublicKey> for EthereumSigner {
+	fn from(x: libsecp256k1::PublicKey) -> Self {
+		let mut m = [0u8; 64];
+		m.copy_from_slice(&x.serialize()[1..65]);
+		let account = H160::from(H256::from_slice(Keccak256::digest(&m).as_slice()));
+		EthereumSigner(account.into())
+	}
+}
+
+#[cfg(feature = "std")]
+impl std::fmt::Display for EthereumSigner {
+	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(fmt, "ethereum signature: {:?}", H160::from_slice(&self.0))
+	}
+}
+
 /// Type of block number.
 pub type BlockNumber = u32;
 
 /// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
-pub type Signature = MultiSignature;
+// pub type Signature = MultiSignature;
+pub type Signature = EthereumSignature;
 
 /// Some way of identifying an account on the chain. We intentionally make it equivalent
 /// to the public key of our transaction signing scheme.
@@ -142,8 +289,8 @@ pub fn native_version() -> sp_version::NativeVersion {
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
 /// We allow for 2 seconds of compute with a 6 second average block time.
-pub const MAXIMUM_BLOCK_WEIGHT: Weight = 2 * WEIGHT_PER_SECOND;
-const WEIGHT_PER_GAS: u64 = 20_000;
+pub const MAXIMUM_BLOCK_WEIGHT: Weight = WEIGHT_PER_SECOND.saturating_mul(2);
+pub const MAXIMUM_BLOCK_LENGTH: u32 = 5 * 1024 * 1024;
 
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
@@ -151,7 +298,7 @@ parameter_types! {
 	pub BlockWeights: frame_system::limits::BlockWeights = frame_system::limits::BlockWeights
 		::with_sensible_defaults(MAXIMUM_BLOCK_WEIGHT, NORMAL_DISPATCH_RATIO);
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(5 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		::max_with_normal_ratio(MAXIMUM_BLOCK_LENGTH, NORMAL_DISPATCH_RATIO);
 	pub const SS58Prefix: u8 = 42;
 }
 
@@ -269,7 +416,7 @@ impl pallet_balances::Config for Runtime {
 	type Event = Event;
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
-	type WeightInfo = ();
+	type WeightInfo = pallet_balances::weights::SubstrateWeight<Runtime>;
 	type MaxLocks = MaxLocks;
 	type MaxReserves = ();
 	type ReserveIdentifier = [u8; 8];
@@ -309,8 +456,24 @@ impl<F: FindAuthor<u32>> FindAuthor<H160> for FindAuthorTruncated<F> {
 	}
 }
 
+const WEIGHT_PER_GAS: u64 = 20_000;
+parameter_types! {
+	pub BlockGasLimit: U256 = U256::from(NORMAL_DISPATCH_RATIO * MAXIMUM_BLOCK_WEIGHT / WEIGHT_PER_GAS);
+	pub PrecompilesValue: FrontierPrecompiles<Runtime> = FrontierPrecompiles::<_>::new();
+	pub WeightPerGas: Weight = WEIGHT_PER_GAS;
+}
+
+pub struct IntoAddressMapping;
+
+impl<T: From<H160>> pallet_evm::AddressMapping<T> for IntoAddressMapping {
+	fn into_account_id(address: H160) -> T {
+		address.into()
+	}
+}
+
+
 pub struct FixedGasWeightMapping;
-impl GasWeightMapping for FixedGasWeightMapping {
+impl pallet_evm::GasWeightMapping for FixedGasWeightMapping {
 	fn gas_to_weight(gas: u64) -> Weight {
 		gas.saturating_mul(WEIGHT_PER_GAS)
 	}
@@ -319,18 +482,14 @@ impl GasWeightMapping for FixedGasWeightMapping {
 	}
 }
 
-parameter_types! {
-	pub BlockGasLimit: U256 = U256::from(NORMAL_DISPATCH_RATIO * MAXIMUM_BLOCK_WEIGHT / WEIGHT_PER_GAS);
-	pub PrecompilesValue: FrontierPrecompiles<Runtime> = FrontierPrecompiles::<_>::new();
-}
-
 impl pallet_evm::Config for Runtime {
 	type FeeCalculator = BaseFee;
 	type GasWeightMapping = FixedGasWeightMapping;
+	// type WeightPerGas = WeightPerGas;
 	type BlockHashMapping = pallet_ethereum::EthereumBlockHashMapping<Self>;
-	type CallOrigin = EnsureAddressTruncated;
-	type WithdrawOrigin = EnsureAddressTruncated;
-	type AddressMapping = HashedAddressMapping<BlakeTwo256>;
+	type CallOrigin = EnsureAddressNever<AccountId>;
+	type WithdrawOrigin = EnsureAddressNever<AccountId>;
+	type AddressMapping = IntoAddressMapping;
 	type Currency = Balances;
 	type Event = Event;
 	type PrecompilesType = FrontierPrecompiles<Self>;
@@ -381,7 +540,7 @@ impl pallet_base_fee::Config for Runtime {
 }
 
 impl pallet_hotfix_sufficients::Config for Runtime {
-	type AddressMapping = HashedAddressMapping<BlakeTwo256>;
+	type AddressMapping = IntoAddressMapping;
 	type WeightInfo = pallet_hotfix_sufficients::weights::SubstrateWeight<Runtime>;
 }
 
@@ -457,7 +616,8 @@ pub type SignedExtra = (
 pub type UncheckedExtrinsic =
 	fp_self_contained::UncheckedExtrinsic<Address, Call, Signature, SignedExtra>;
 /// Extrinsic type that has already been checked.
-pub type CheckedExtrinsic = fp_self_contained::CheckedExtrinsic<AccountId, Call, SignedExtra, H160>;
+pub type CheckedExtrinsic =
+	fp_self_contained::CheckedExtrinsic<AccountId, Call, SignedExtra, H160>;
 /// The payload being signed in transactions.
 pub type SignedPayload = generic::SignedPayload<Call, SignedExtra>;
 /// Executive: handles dispatch to the various modules.
@@ -505,7 +665,9 @@ impl fp_self_contained::SelfContainedCall for Call {
 		len: usize,
 	) -> Option<Result<(), TransactionValidityError>> {
 		match self {
-			Call::Ethereum(call) => call.pre_dispatch_self_contained(info, dispatch_info, len),
+			Call::Ethereum(call) => {
+				call.pre_dispatch_self_contained(info, dispatch_info, len)
+			}
 			_ => None,
 		}
 	}
@@ -515,9 +677,11 @@ impl fp_self_contained::SelfContainedCall for Call {
 		info: Self::SignedInfo,
 	) -> Option<sp_runtime::DispatchResultWithInfo<PostDispatchInfoOf<Self>>> {
 		match self {
-			call @ Call::Ethereum(pallet_ethereum::Call::transact { .. }) => Some(call.dispatch(
-				Origin::from(pallet_ethereum::RawOrigin::EthereumTransaction(info)),
-			)),
+			call @ Call::Ethereum(pallet_ethereum::Call::transact { .. }) => {
+				Some(call.dispatch(Origin::from(
+					pallet_ethereum::RawOrigin::EthereumTransaction(info),
+				)))
+			}
 			_ => None,
 		}
 	}
@@ -855,5 +1019,18 @@ impl_runtime_apis! {
 			if batches.is_empty() { return Err("Benchmark not found for this pallet.".into()) }
 			Ok(batches)
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{Runtime, WeightPerGas};
+	#[test]
+	fn configured_base_extrinsic_weight_is_evm_compatible() {
+		let min_ethereum_transaction_weight = WeightPerGas::get() * 21_000;
+		let base_extrinsic = <Runtime as frame_system::Config>::BlockWeights::get()
+			.get(frame_support::dispatch::DispatchClass::Normal)
+			.base_extrinsic;
+		assert!(base_extrinsic.ref_time() <= min_ethereum_transaction_weight.ref_time());
 	}
 }

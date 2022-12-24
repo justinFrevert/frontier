@@ -61,6 +61,11 @@ pallet-evm-precompile-sha3fips = { path = "../../frame/evm/precompile/sha3fips",
 pallet-evm-precompile-simple = { path = "../../frame/evm/precompile/simple", default-features = false }
 pallet-hotfix-sufficients = { path = "../../frame/hotfix-sufficients", default-features = false }
 
+sha3 = { version = "0.9", default-features = false }
+impl-serde = { version = "0.3.1", default-features = false }
+log = { version = "0.4.0", default-features = false }
+libsecp256k1 = { version = "0.6", default-features = false, features = [ "hmac" ] }
+
 [build-dependencies]
 substrate-wasm-builder = { version = "5.0.0-dev", git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.27" }
 
@@ -114,6 +119,10 @@ std = [
 	"pallet-evm-precompile-sha3fips/std",
 	"pallet-evm-precompile-simple/std",
 	"pallet-hotfix-sufficients/std",
+	"log/std",
+	"libsecp256k1/std",
+	"impl-serde/std",
+	"sha3/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking",
